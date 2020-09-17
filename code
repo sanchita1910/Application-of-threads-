@@ -1,0 +1,130 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <stdbool.h>
+#define TOTAL_SEATS 6
+#define CUSTOMERS 9
+#define RETURN_TIME 5
+void *customerMakerFunction();
+void *restaurant();
+void *waitingRoom(int);
+bool checkWhetherSeatIsAvailable(int);
+/** Mutex for checking the queue, waiting and sleeping **/
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t wait_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t sleep_mutex = PTHREAD_MUTEX_INITIALIZER;
+/** Conditional wait Mutexes for chef's working and sleeping **/
+pthread_cond_t chefSleep_cond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t chefWorking_cond = PTHREAD_COND_INITIALIZER;
+int currentCustomersInRestaurant=0, sleeping=0;
+int main(int argc, char *argv[])
+{
+//declare chef and customer creating thread;
+pthread_t chef,customerMaker;
+ //creates restaurant thread with chef
+pthread_create(&chef,NULL,restaurant,NULL);
+//create cutomerMaker
+pthread_create(&customerMaker,NULL,customerMakerFunction,NULL);
+pthread_join(chef,NULL);
+pthread_join(customerMaker,NULL);
+return 0;
+}
+void *customerMakerFunction()
+{
+int i=0;
+fflush(stdout);
+pthread_t customer[CUSTOMERS];
+pthread_attr_t customerAttr[CUSTOMERS];
+while(i < CUSTOMERS)
+{
+ i++;
+pthread_attr_init(&customerAttr[i]);
+sleep(1);
+pthread_create(&customer[i],&customerAttr[i],waitingRoom,i);
+}
+pthread_exit(0);
+}
+void *waitingRoom(int customerNumber)
+{
+//take seat
+pthread_mutex_lock(&queue_mutex);
+bool isSeatAvailable = checkWhetherSeatIsAvailable(customerNumber);
+ if( !isSeatAvailable ) {
+ sleep(RETURN_TIME);
+ waitingRoom(customerNumber);
+ }
+}
+void *restaurant()
+{
+ printf("***********************\n");
+ printf(" Restaurant opens \n");
+printf("***********************\n\n");
+fflush(stdout);
+while(1)
+{
+if(currentCustomersInRestaurant==0)
+{
+printf("\tRestaurant is empty so the Chef goes to sleep.\n");
+fflush(stdout);
+ // locking on sleep_mutex to edit 'sleeping' flag
+pthread_mutex_lock(&sleep_mutex);
+sleeping=1;
+ // now chef waits until customer wakes him up
+pthread_cond_wait(&chefSleep_cond,&sleep_mutex);
+ // After waking up, chef changes the 'sleeping' flag and unlocks sleep_mutex
+ sleeping=0;
+pthread_mutex_unlock(&sleep_mutex);
+printf("\t\t\tChef wakes up !!\n");
+fflush(stdout);
+}
+else
+{
+ int seatNumber = currentCustomersInRestaurant;
+printf("\n\tChef starts preparing for customer in seat #%d.\n\n",
+seatNumber);
+fflush(stdout);
+ // time taken to prepare food
+sleep(3);
+ // now after food is served, reducing the current customers in restaurant
+currentCustomersInRestaurant--;
+printf("\n\tChef serves food for customer in seat #%d.
+Customer leaves the restaurant.\t\t\t\t\t%d Customers in store.\n\n",seatNumber,
+currentCustomersInRestaurant);
+pthread_cond_signal(&chefWorking_cond);
+}
+}
+pthread_exit(0);
+}
+bool checkWhetherSeatIsAvailable(int customerNumber)
+{
+currentCustomersInRestaurant++;
+printf("\tCustomer #%d arrives in the waiting room.\t\t\t\t\t\t\t\t\t%d Customers in
+store.\n",customerNumber, currentCustomersInRestaurant);
+fflush(stdout);
+printf("\t\tCustomer checking chairs.\n");
+fflush(stdout);
+ // checks if seats are available
+if(currentCustomersInRestaurant < TOTAL_SEATS)
+{
+if(sleeping==1)
+{
+printf("\t\t\tChef is offline, customer calls chef.\n");
+fflush(stdout);
+pthread_cond_signal(&chefSleep_cond);
+}
+printf("\t\tCustomer #%d now takes seat: #%d.\n", customerNumber,
+currentCustomersInRestaurant);
+fflush(stdout);
+pthread_mutex_unlock(&queue_mutex);
+pthread_mutex_lock(&wait_mutex);
+pthread_cond_wait(&chefWorking_cond,&wait_mutex);
+pthread_mutex_unlock(&wait_mutex);
+return true;
+} else {
+printf("\t\tRestaurant is full, leaving store now.\n");
+fflush(stdout);
+currentCustomersInRestaurant--;
+pthread_mutex_unlock(&queue_mutex);
+return false;
+}
+}
